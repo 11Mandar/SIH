@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 
 from fastapi.middleware.cors import CORSMiddleware
-from backend.parsers.windows_parser import parse_windows_event
-from backend.normalization.mapper import normalize_windows_event
-from backend.validation.models import NormalizedEvent
+from backend.processing.pipeline import process_event
+from backend.processing.persistence import (
+    persist_processed_event,
+    persist_processing_error,
+)
 from backend.database.db import init_db, get_db_connection
 import uuid
 import json
@@ -25,113 +27,56 @@ init_db()
 @app.post("/api/v1/events")
 def receive_event(event: dict):
 
-    # 1. Parse
-    parsed_event = parse_windows_event(event)
+    # ---------------------------------------------------------------
+    # 1. Process event through the common pipeline
+    # ---------------------------------------------------------------
 
-    # 2. Normalize
-    normalized_event = normalize_windows_event(parsed_event)
+    result = process_event(event)
 
-    # 3. Validate
-    validated_event = NormalizedEvent(**normalized_event)
+    # ---------------------------------------------------------------
+    # 2. Handle processing failure
+    # ---------------------------------------------------------------
 
-    # 4. Create trace ID
-    trace_id = str(uuid.uuid4())
+    if not result.success:
 
-    # 5. Connect to PostgreSQL
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # 6. Store RAW event
-    cursor.execute(
-        """
-        INSERT INTO raw_events
-        (
-            source_id,
-            trace_id,
-            detected_format,
-            raw_event,
-            raw_metadata
+        persistence_result = persist_processing_error(
+            event=event,
+            processing_result=result,
+            source_id=1,
         )
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING raw_event_id
-        """,
-        (
-            1,
-            trace_id,
-            "Windows Event",
-            json.dumps(event),
-            Json({"agent_version": "1.0"})
-        )
+
+        return {
+            "status": "error",
+            "trace_id": persistence_result["trace_id"],
+            "raw_event_id": persistence_result["raw_event_id"],
+            "detected_format": result.detected_format,
+            "stage": result.error_stage,
+            "error_type": result.error_type,
+            "message": result.error_message,
+        }
+
+    # ---------------------------------------------------------------
+    # 3. Store successful event
+    # ---------------------------------------------------------------
+
+    persistence_result = persist_processed_event(
+        event=event,
+        processing_result=result,
+        source_id=1,
     )
 
-    raw_event_id = cursor.fetchone()[0]
-
-            # 7. Store NORMALIZED event
-    cursor.execute(
-        """
-        INSERT INTO normalized_events
-        (
-            raw_event_id,
-            trace_id,
-            source_id,
-            event_id,
-            timestamp,
-            source_type,
-            vendor,
-            system,
-            device,
-            event_type,
-            source_ip,
-            source_port,
-            destination_ip,
-            destination_port,
-            user_id,
-            user_name,
-            action,
-            outcome,
-            message,
-            parser_version,
-            validation_status
-        )
-        VALUES
-        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            raw_event_id,
-            trace_id,
-            1,
-            str(validated_event.event_id),
-            validated_event.timestamp,
-            "Windows",
-            "Microsoft",
-            "Windows",
-            validated_event.device,
-            validated_event.event_type,
-            validated_event.source_ip,
-            validated_event.source_port,
-            validated_event.destination_ip,
-            validated_event.destination_port,
-            validated_event.user_id,
-            validated_event.user_name,
-            validated_event.action,
-            validated_event.outcome,
-            json.dumps(validated_event.message),
-            "1.0",
-            "valid"
-        )
-    )
-
-    conn.commit()
-
-    cursor.close()
-    conn.close()
+    # ---------------------------------------------------------------
+    # 4. Return result
+    # ---------------------------------------------------------------
 
     return {
         "status": "success",
-        "trace_id": trace_id,
-        "raw_event_id": raw_event_id,
-        "normalized_event": validated_event.model_dump()
+        "trace_id": persistence_result["trace_id"],
+        "raw_event_id": persistence_result["raw_event_id"],
+        "detected_format": result.detected_format,
+        "normalized_event": result.validated_event.model_dump(),
     }
+
 
 @app.get("/api/v1/normalized-events")
 def get_normalized_events():

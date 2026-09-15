@@ -34,5 +34,6 @@ logs = [
     'User=admin IP=192.168.1.10 Action=Login'
 ]
 
-for log in logs:
-    print(detect_format(log))
+if __name__ == "__main__":
+    for log in logs:
+        print(detect_format(log))
