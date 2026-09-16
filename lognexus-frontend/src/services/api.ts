@@ -166,9 +166,19 @@ export async function getSourceProfiles(): Promise<SourceProfile[]> {
     type: profile.source_type ?? "Windows",
     status: profile.status ?? "Pending Human Validation",
     parser: String(profile.format ?? "Unknown"),
+
     mapping: Array.isArray(profile.field_mapping)
-      ? profile.field_mapping
+      ? profile.field_mapping.map((m: any) => ({
+          from: String(m.source_field ?? m.from ?? ""),
+          to: String(m.target_field ?? m.to ?? ""),
+          confidence:
+            m.confidence !== undefined
+              ? Number(m.confidence)
+              : undefined,
+          reason: m.reason ?? undefined,
+        }))
       : [],
+
     aiSuggested: profile.ai_suggested ?? false,
     suggestionNote: profile.suggestion_note ?? undefined,
   }));
@@ -215,4 +225,109 @@ export async function reviewSourceProfile(
   if (!response.ok) {
     throw new Error("Failed to review source profile");
   }
+}
+
+
+// ============================================================
+// AI MAPPING / HUMAN VALIDATION
+// ============================================================
+
+export interface AIMappingResult {
+  source_field: string;
+  target_field: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface AIInferenceResponse {
+  status: string;
+  mapping: {
+    mappings: AIMappingResult[];
+  };
+}
+
+/**
+ * Ask the backend AI service to infer a normalized field mapping
+ * from an unknown log sample.
+ */
+export async function inferLogMapping(
+  logSample: string
+): Promise<AIInferenceResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/ai/infer-mapping`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        log_sample: logSample,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `AI mapping inference failed: ${errorText || response.statusText}`
+    );
+  }
+
+  return response.json();
+}
+
+
+/**
+ * Save a human-reviewed AI mapping as a Source Profile.
+ *
+ * The mapping is only persisted after the human explicitly
+ * approves it.
+ */
+export async function validateSourceProfile(input: {
+  profile_name: string;
+  source_type: string;
+  vendor: string;
+  format: string;
+  field_mapping: Array<{
+    source_field: string;
+    target_field: string;
+    confidence?: number;
+    reason?: string;
+  }>;
+  parser_config?: Record<string, unknown>;
+  decision: "Approved" | "Rejected";
+  approved_by?: number;
+}): Promise<{
+  status: string;
+  source_profile_id?: number;
+  decision: string;
+  field_mapping?: Array<{
+    source_field: string;
+    target_field: string;
+    confidence?: number;
+    reason?: string;
+  }>;
+}> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/source-profiles/validate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `Source profile validation failed: ${
+        errorText || response.statusText
+      }`
+    );
+  }
+
+  return response.json();
 }

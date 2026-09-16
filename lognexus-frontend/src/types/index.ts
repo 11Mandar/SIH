@@ -72,6 +72,8 @@ export type ProfileStatus = "Approved" | "Pending Human Validation" | "Rejected"
 export interface FieldMapping {
   from: string;
   to: string;
+  confidence?: number;
+  reason?: string;
 }
 
 export interface SourceProfile {

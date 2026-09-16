@@ -6,15 +6,11 @@ Responsibilities:
     2. Select the appropriate parser
     3. Normalize the parsed event
     4. Validate the normalized event
-    5. Return a structured processing result
+    5. Apply approved Source Profiles for custom sources
+    6. Return a structured processing result
 
-This module deliberately does NOT:
-    - receive network traffic
-    - create FastAPI routes
-    - write directly to PostgreSQL
-    - generate dashboard responses
-
-Those responsibilities belong to other layers.
+AI is used only during Source Profile onboarding.
+Approved mappings are reused deterministically during processing.
 """
 
 from dataclasses import dataclass, field
@@ -28,8 +24,11 @@ from backend.parsers.syslog_parser import parse_syslog
 from backend.normalization.mapper import (
     normalize_windows_event,
     normalize_syslog_event,
+    normalize_profile_event,
 )
+
 from backend.validation.models import NormalizedEvent
+from backend.database.db import get_db_connection
 
 
 # ---------------------------------------------------------------------------
@@ -38,13 +37,6 @@ from backend.validation.models import NormalizedEvent
 
 @dataclass
 class ProcessingResult:
-    """
-    Result returned by the LogNexus processing pipeline.
-
-    Keeping this as a single object makes it easier for ingestion layers
-    and future queue/worker systems to consume the result consistently.
-    """
-
     success: bool
     detected_format: str
     raw_event: Any
@@ -87,21 +79,13 @@ NORMALIZERS = {
 def detect_event_format(event):
     """
     Detect the format of an incoming event.
-
-    Supports:
-    - Windows Event dictionaries
-    - Raw Syslog strings
-    - API payloads containing a raw_log field
     """
 
-    # Raw log sent directly as a string
     if isinstance(event, str):
         return detect_format(event)
 
-    # Dictionary-based event
     if isinstance(event, dict):
 
-        # Windows Event
         if (
             "event_id" in event
             and (
@@ -112,7 +96,6 @@ def detect_event_format(event):
         ):
             return "Windows Event"
 
-        # Raw log wrapped by an API payload
         if "raw_log" in event:
             raw_log = event["raw_log"]
 
@@ -120,6 +103,7 @@ def detect_event_format(event):
                 return detect_format(raw_log)
 
     return "Unknown"
+
 
 # ---------------------------------------------------------------------------
 # Parsing
@@ -137,7 +121,6 @@ def parse_event(event, detected_format):
             f"No parser registered for format: {detected_format}"
         )
 
-    # API payload containing raw log
     if isinstance(event, dict) and "raw_log" in event:
         event = event["raw_log"]
 
@@ -145,19 +128,124 @@ def parse_event(event, detected_format):
 
 
 # ---------------------------------------------------------------------------
-# Normalization
+# Source Profile lookup
+# ---------------------------------------------------------------------------
+
+def get_approved_source_profile(parsed_event):
+    """
+    Find an approved custom source profile that matches the
+    incoming log's structure.
+
+    A profile is considered applicable when its parser_config
+    defines a delimiter and that delimiter exists in the log
+    message.
+    """
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    source_profile_id,
+                    profile_name,
+                    source_type,
+                    vendor,
+                    format,
+                    field_mapping,
+                    parser_config,
+                    status
+                FROM source_profiles
+                WHERE status = 'Approved'
+                  AND source_type = 'Syslog'
+                ORDER BY source_profile_id DESC
+            """)
+
+            profiles = cur.fetchall()
+
+        if not profiles:
+            return None
+
+        message = parsed_event.get("message", "")
+
+        if not isinstance(message, str):
+            return None
+
+        for profile in profiles:
+            parser_config = profile[6] or {}
+
+            delimiter = parser_config.get("delimiter")
+
+            if delimiter and delimiter in message:
+                return {
+                    "source_profile_id": profile[0],
+                    "profile_name": profile[1],
+                    "source_type": profile[2],
+                    "vendor": profile[3],
+                    "format": profile[4],
+                    "field_mapping": profile[5],
+                    "parser_config": parser_config,
+                    "status": profile[7],
+                }
+
+        return None
+
+    finally:
+        conn.close()
+
+# ---------------------------------------------------------------------------
+# Profile field extraction
+# ---------------------------------------------------------------------------
+
+def extract_profile_fields(parsed_event, parser_config=None):
+    """
+    Extract positional fields from a parsed Syslog message.
+
+    Example:
+
+        timestamp|device|action|source_ip|destination_ip|protocol|src_port|dst_port
+
+    becomes:
+
+        field_1
+        field_2
+        field_3
+        ...
+    """
+
+    parser_config = parser_config or {}
+
+    message = parsed_event.get("message")
+
+    if not isinstance(message, str):
+        raise ValueError(
+            "Source Profile requires a string message."
+        )
+
+    delimiter = parser_config.get("delimiter", "|")
+
+    if not delimiter:
+        delimiter = "|"
+
+    values = [
+        value.strip()
+        for value in message.split(delimiter)
+    ]
+
+    return {
+        f"field_{index}": value
+        for index, value in enumerate(values, start=1)
+    }
+
+
+# ---------------------------------------------------------------------------
+# Standard normalization
 # ---------------------------------------------------------------------------
 
 def normalize_event(
     parsed_event: dict[str, Any],
     detected_format: str,
 ) -> dict[str, Any]:
-    """
-    Normalize a parsed event into the LogNexus common event structure.
-
-    Format-specific normalizers can be added to NORMALIZERS without changing
-    the main processing pipeline.
-    """
 
     normalizer = NORMALIZERS.get(detected_format)
 
@@ -177,15 +265,63 @@ def normalize_event(
 
 
 # ---------------------------------------------------------------------------
+# Source Profile normalization
+# ---------------------------------------------------------------------------
+
+def normalize_with_source_profile(
+    parsed_event,
+    source_profile,
+):
+    """
+    Apply a previously approved Source Profile.
+
+    No AI call happens here.
+    """
+
+    parser_config = source_profile.get("parser_config") or {}
+    field_mapping = source_profile.get("field_mapping") or []
+
+    parsed_fields = extract_profile_fields(
+        parsed_event,
+        parser_config,
+    )
+
+    normalized = normalize_profile_event(
+        parsed_fields,
+        field_mapping,
+    )
+
+    # Profile metadata
+    normalized["source"] = source_profile.get(
+        "source_type"
+    ) or "Syslog"
+
+    normalized["device"] = (
+        normalized.get("device")
+        or parsed_event.get("hostname")
+    )
+
+    # Store provenance without changing the existing DB schema.
+    normalized["extra_data"]["source_profile_id"] = (
+        source_profile["source_profile_id"]
+    )
+
+    normalized["extra_data"]["source_profile_name"] = (
+        source_profile["profile_name"]
+    )
+
+    normalized["extra_data"]["profile_based_processing"] = True
+
+    return normalized
+
+
+# ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate_event(normalized_event: dict[str, Any]) -> NormalizedEvent:
+def validate_event(normalized_event):
     """
-    Validate a normalized event using the central Pydantic model.
-
-    Validation is intentionally performed after normalization so that every
-    source eventually follows the same validation contract.
+    Validate normalized event using the central Pydantic model.
     """
 
     return NormalizedEvent(**normalized_event)
@@ -196,28 +332,9 @@ def validate_event(normalized_event: dict[str, Any]) -> NormalizedEvent:
 # ---------------------------------------------------------------------------
 
 def process_event(event: Any) -> ProcessingResult:
-    """
-    Run one event through the complete LogNexus processing pipeline.
-
-    Flow:
-
-        Input
-          ↓
-        Detection
-          ↓
-        Parsing
-          ↓
-        Normalization
-          ↓
-        Validation
-          ↓
-        ProcessingResult
-
-    Database persistence is intentionally handled outside this function.
-    """
 
     # ---------------------------------------------------------------
-    # 1. Detect format
+    # 1. Detect
     # ---------------------------------------------------------------
 
     detected_format = detect_event_format(event)
@@ -237,12 +354,14 @@ def process_event(event: Any) -> ProcessingResult:
     # ---------------------------------------------------------------
 
     try:
+
         parsed_event = parse_event(
             event,
             detected_format,
         )
 
     except Exception as exc:
+
         return ProcessingResult(
             success=False,
             detected_format=detected_format,
@@ -257,12 +376,37 @@ def process_event(event: Any) -> ProcessingResult:
     # ---------------------------------------------------------------
 
     try:
-        normalized_event = normalize_event(
-            parsed_event,
-            detected_format,
-        )
+
+        source_profile = None
+
+        if detected_format == "Syslog":
+
+            source_profile = get_approved_source_profile(
+                parsed_event
+            )
+
+        if source_profile:
+
+            normalized_event = normalize_with_source_profile(
+                parsed_event,
+                source_profile,
+            )
+
+            profile_based = True
+            profile_id = source_profile["source_profile_id"]
+
+        else:
+
+            normalized_event = normalize_event(
+                parsed_event,
+                detected_format,
+            )
+
+            profile_based = False
+            profile_id = None
 
     except Exception as exc:
+
         return ProcessingResult(
             success=False,
             detected_format=detected_format,
@@ -278,11 +422,13 @@ def process_event(event: Any) -> ProcessingResult:
     # ---------------------------------------------------------------
 
     try:
+
         validated_event = validate_event(
             normalized_event
         )
 
     except Exception as exc:
+
         return ProcessingResult(
             success=False,
             detected_format=detected_format,
@@ -292,6 +438,10 @@ def process_event(event: Any) -> ProcessingResult:
             error_stage="validation",
             error_type=type(exc).__name__,
             error_message=str(exc),
+            metadata={
+                "source_profile_id": profile_id,
+                "profile_based_processing": profile_based,
+            },
         )
 
     # ---------------------------------------------------------------
@@ -306,20 +456,22 @@ def process_event(event: Any) -> ProcessingResult:
         normalized_event=normalized_event,
         validated_event=validated_event,
         metadata={
-            "pipeline_version": "1.0",
+            "pipeline_version": "1.1",
+            "source_profile_id": profile_id,
+            "profile_based_processing": profile_based,
         },
     )
 
 
 # ---------------------------------------------------------------------------
-# Simple local test
+# Local tests
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
-    # ---------------------------------------------------------------
+    # ===============================================================
     # Test 1: Windows Event
-    # ---------------------------------------------------------------
+    # ===============================================================
 
     windows_event = {
         "event_id": 4624,
@@ -329,7 +481,7 @@ if __name__ == "__main__":
         "message_data": [
             {
                 "name": "TargetUserName",
-                "value": "admin"
+                "value": "admin",
             }
         ],
         "source_ip": "192.168.1.20",
@@ -350,14 +502,14 @@ if __name__ == "__main__":
     if result.success:
         print("Normalized:")
         print(result.validated_event.model_dump())
+
     else:
         print("Stage:", result.error_stage)
         print("Error:", result.error_message)
 
-
-    # ---------------------------------------------------------------
-    # Test 2: Syslog
-    # ---------------------------------------------------------------
+    # ===============================================================
+    # Test 2: Standard Syslog
+    # ===============================================================
 
     syslog_event = (
         "<165>1 2026-09-12T12:00:00Z "
@@ -368,13 +520,101 @@ if __name__ == "__main__":
 
     print()
     print("=" * 70)
-    print("SYSLOG EVENT TEST")
+    print("STANDARD SYSLOG TEST")
     print("=" * 70)
 
     result = process_event(syslog_event)
 
     print("Success:", result.success)
     print("Format:", result.detected_format)
+
+    if result.success:
+        print("Profile Used:",
+              result.metadata.get("source_profile_id"))
+
+        print("Profile Based:",
+              result.metadata.get("profile_based_processing"))
+
+        print("Normalized:")
+        print(result.validated_event.model_dump())
+
+    else:
+        print("Stage:", result.error_stage)
+        print("Error:", result.error_message)
+
+    # ===============================================================
+    # Test 3: Firewall Source Profile
+    # ===============================================================
+
+    firewall_event = (
+        "<165>1 2026-09-16T14:30:00Z "
+        "firewall01 firewall 1234 FW001 "
+        '[exampleSDID@32473 eventID="1011"] '
+        "2026-09-16T14:30:00Z|"
+        "firewall01|"
+        "DENY|"
+        "10.0.0.5|"
+        "10.0.0.10|"
+        "TCP|"
+        "51520|"
+        "443"
+    )
+
+    print()
+    print("=" * 70)
+    print("FIREWALL PROFILE TEST")
+    print("=" * 70)
+
+    result = process_event(firewall_event)
+
+    print("Success:", result.success)
+    print("Format:", result.detected_format)
+
+    print(
+        "Profile ID:",
+        result.metadata.get("source_profile_id")
+    )
+
+    print(
+        "Profile Based:",
+        result.metadata.get("profile_based_processing")
+    )
+
+    if result.success:
+
+        print("Normalized:")
+        print(result.validated_event.model_dump())
+
+    else:
+
+        print("Stage:", result.error_stage)
+        print("Error:", result.error_message)
+
+
+    print("\n" + "=" * 70)
+    print("SECOND FIREWALL LOG - PROFILE REUSE TEST")
+    print("=" * 70)
+
+    second_firewall_log = (
+        "<165>1 2026-09-16T15:05:22Z firewall01 firewall 5678 FW002 "
+        "[exampleSDID@32473 eventID=\"1012\"] "
+        "2026-09-16T15:05:22Z|firewall01|ALLOW|10.0.0.25|10.0.0.30|UDP|53521|53"
+    )
+
+    result = process_event(second_firewall_log)
+
+    print("Success:", result.success)
+    print("Format:", result.detected_format)
+
+    print(
+        "Profile ID:",
+        result.metadata.get("source_profile_id")
+    )
+
+    print(
+        "Profile Based:",
+        result.metadata.get("profile_based_processing")
+    )
 
     if result.success:
         print("Normalized:")
