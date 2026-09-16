@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Settings, LogOut, ChevronDown } from "lucide-react";
+import { Search, Settings, LogOut, ChevronDown, Sun, Moon } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useDrawer } from "../../context/DrawerContext";
 import { getRawLogs, getNormalizedLogs, getSources } from "../../services/api";
@@ -12,7 +12,14 @@ export function TopBar() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [isLightMode, setIsLightMode] = useState(() => localStorage.getItem("lognexus-theme") === "light");
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const theme = isLightMode ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("lognexus-theme", theme);
+  }, [isLightMode]);
 
   // System status live telemetry
   const [sourceCount, setSourceCount] = useState<number>(6);
@@ -91,7 +98,7 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-border bg-[#0B0F19]/95 px-4 sm:px-6 backdrop-blur-md">
+    <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-border bg-bg/95 px-4 sm:px-6 backdrop-blur-md">
       {/* Left: Chetas Logo + Wordmark */}
       <div className="flex items-center gap-4">
         <Link to="/overview" className="flex items-center gap-3 group">
@@ -149,6 +156,17 @@ export function TopBar() {
 
       {/* Right: Global Provenance Search & Account Menu */}
       <div className="flex items-center gap-3">
+        {/* Theme Toggle */}
+        <button
+          type="button"
+          onClick={() => setIsLightMode((prev) => !prev)}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-text-secondary hover:bg-surface-raised hover:text-text-primary transition-colors"
+          aria-label={isLightMode ? "Switch to dark mode" : "Switch to light mode"}
+          title={isLightMode ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          {isLightMode ? <Moon size={15} /> : <Sun size={15} />}
+        </button>
+
         {/* Global Search field */}
         <form onSubmit={handleGlobalSearch} className="relative">
           <Search
