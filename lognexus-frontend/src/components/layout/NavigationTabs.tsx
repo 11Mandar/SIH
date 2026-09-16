@@ -25,7 +25,7 @@ export function NavigationTabs() {
   }
 
   return (
-    <nav className="w-full border-b border-border bg-[#0B0F19] px-4 sm:px-6">
+    <nav className="w-full border-b border-border bg-bg px-4 sm:px-6">
       <div className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto no-scrollbar">
         {navItems.map((item) => {
           const Icon = item.icon;
