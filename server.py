@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-
+from backend.ai.field_inference import infer_field_mapping
 from fastapi.middleware.cors import CORSMiddleware
 from backend.processing.pipeline import process_event
 from backend.processing.persistence import (
@@ -356,6 +356,30 @@ def get_recent_events():
 
     return events
 
+
+@app.post("/api/v1/ai/infer-mapping")
+def infer_mapping(payload: dict):
+    log_sample = payload.get("log_sample")
+
+    if not log_sample or not isinstance(log_sample, str):
+        raise HTTPException(
+            status_code=400,
+            detail="log_sample is required."
+        )
+
+    try:
+        mapping = infer_field_mapping(log_sample)
+
+        return {
+            "status": "success",
+            "mapping": mapping
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.get("/api/v1/source-profiles")
 def get_source_profiles():
