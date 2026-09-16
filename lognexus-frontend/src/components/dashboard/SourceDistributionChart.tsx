@@ -12,17 +12,17 @@ export function SourceDistributionChart({ data }: SourceDistributionChartProps) 
   return (
     <ResponsiveContainer width="100%" height={280}>
       <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-        <CartesianGrid stroke="#1F2937" strokeDasharray="3 5" horizontal={false} />
+        <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 5" horizontal={false} />
         <XAxis
           type="number"
-          tick={{ fill: "#8B93A7", fontSize: 11, fontFamily: "JetBrains Mono" }}
-          axisLine={{ stroke: "#1F2937" }}
+          tick={{ fill: "var(--color-text-secondary)", fontSize: 11, fontFamily: "JetBrains Mono" }}
+          axisLine={{ stroke: "var(--color-border)" }}
           tickLine={false}
         />
         <YAxis
           type="category"
           dataKey="sourceType"
-          tick={{ fill: "#E6EDF3", fontSize: 11, fontFamily: "JetBrains Mono" }}
+          tick={{ fill: "var(--color-text-primary)", fontSize: 11, fontFamily: "JetBrains Mono" }}
           axisLine={false}
           tickLine={false}
           width={90}
@@ -30,14 +30,15 @@ export function SourceDistributionChart({ data }: SourceDistributionChartProps) 
         <Tooltip
           cursor={{ fill: "rgba(6,182,212,0.06)" }}
           contentStyle={{
-            backgroundColor: "#111827",
+            backgroundColor: "var(--color-surface)",
             border: "1px solid rgba(6,182,212,0.3)",
             borderRadius: 8,
-            color: "#E6EDF3",
+            color: "var(--color-text-primary)",
             fontSize: 12,
             fontFamily: "JetBrains Mono",
           }}
-          labelStyle={{ color: "#8B93A7" }}
+          labelStyle={{ color: "var(--color-text-secondary)" }}
+          itemStyle={{ color: "var(--color-text-primary)" }}
           formatter={(value: number) => [value.toLocaleString(), "Events"]}
         />
         <Bar dataKey="events" radius={[0, 5, 5, 0]} barSize={16}>
