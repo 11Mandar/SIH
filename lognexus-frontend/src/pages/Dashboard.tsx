@@ -38,12 +38,7 @@ export function Dashboard() {
     try {
       const [statsRes, activityRes, distributionRes, recentRes, profilesRes] =
         await Promise.all([
-          getDashboardStats().catch(() => ({
-            totalSources: 8,
-            totalEvents: 142080,
-            normalizedEvents: 141990,
-            processingErrors: 0,
-          })),
+          getDashboardStats(),
           getEventActivity().catch(() => []),
           getSourceDistribution().catch(() => []),
           getRecentEvents().catch(() => []),
@@ -58,7 +53,7 @@ export function Dashboard() {
       const pending = profilesRes.filter(
         (p: any) => p.status === "Pending Human Validation" || p.aiSuggested
       ).length;
-      setPendingApprovals(pending || 3);
+      setPendingApprovals(pending);
     } finally {
       setLoading(false);
       setRefreshing(false);
