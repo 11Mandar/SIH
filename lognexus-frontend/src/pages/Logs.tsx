@@ -64,77 +64,55 @@ export function Logs() {
     }
   }, [globalQ]);
 
-  const loadLogs = async () => {
+      const loadLogs = async () => {
     try {
-      const [rawList, normList] = await Promise.all([
-        getRawLogs().catch(() => []),
+      setLoading(true);
+
+      // Normalized events drive the main table.
+      // Raw events are fetched only for Inspect / Trace View.
+      const [normList, rawList] = await Promise.all([
         getNormalizedLogs().catch(() => []),
+        getRawLogs().catch(() => []),
       ]);
 
-      // Merge raw and normalized events by provenanceId / traceId
-      const map = new Map<string, CombinedLogEvent>();
+      const rawByTrace = new Map(
+        rawList.map((raw) => [raw.provenanceId, raw])
+      );
 
-      // Index raw logs
-      for (const r of rawList) {
-        const key = r.provenanceId || r.id;
-        map.set(key, {
-          id: r.id,
-          provenanceId: r.provenanceId || r.id,
-          timestamp: r.timestamp,
-          source: r.source,
-          format: r.format,
-          rawEvent: r.rawEvent,
-          rawLog: r,
-          eventType: "Raw Ingestion",
-          severity: "Info",
-          sourceIp: "-",
-          destinationIp: "-",
-          action: "-",
-          status: "Processing",
-        });
-      }
+      const normalizedLogs: CombinedLogEvent[] = normList.map((log: any) => {
+        const traceId = log.traceId || log.id;
+        const rawLog = rawByTrace.get(traceId);
 
-      // Merge normalized logs
-      for (const n of normList) {
-        const key = n.provenanceId || n.id;
-        const existing = map.get(key);
-        if (existing) {
-          existing.normalizedLog = n;
-          existing.eventType = n.eventType;
-          existing.severity = (n as any).severity || "Info";
-          existing.sourceIp = n.sourceIp || "-";
-          existing.destinationIp = n.destinationIp || "-";
-          existing.action = n.action || "-";
-          existing.status = n.status || "Normalized";
-        } else {
-          map.set(key, {
-            id: n.id,
-            provenanceId: n.provenanceId || n.id,
-            timestamp: n.timestamp,
-            source: n.source,
-            format: n.format || "Universal",
-            rawEvent: n.rawEvent || JSON.stringify(n),
-            normalizedLog: n,
-            eventType: n.eventType,
-            severity: (n as any).severity || "Info",
-            sourceIp: n.sourceIp || "-",
-            destinationIp: n.destinationIp || "-",
-            action: n.action || "-",
-            status: n.status || "Normalized",
-          });
-        }
-      }
+        return {
+          id: log.id,
+          provenanceId: traceId,
+          timestamp: log.timestamp || "",
+          source: log.source || "Unknown",
+          format: log.source || "Unknown",
+          rawEvent: rawLog?.rawEvent || JSON.stringify(log),
+          normalizedLog: log,
+          rawLog,
+          eventType: log.eventType || "Unknown Event",
+          severity: log.severity || "Info",
+          sourceIp: log.sourceIp || "-",
+          destinationIp: log.destinationIp || "-",
+          action: log.action || "-",
+          status:
+            log.validationStatus === "valid"
+              ? "Valid"
+              : log.validationStatus || "Validation Failed",
+        };
+      });
 
-      const list = Array.from(map.values());
-      setCombinedLogs(list);
-      if (list.length > 0 && !selectedEvent) {
-        setSelectedEvent(list[0]);
+      setCombinedLogs(normalizedLogs);
+
+      if (normalizedLogs.length > 0) {
+        setSelectedEvent((current) => current ?? normalizedLogs[0]);
       }
     } finally {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     loadLogs();
   }, []);
@@ -241,10 +219,10 @@ export function Logs() {
             </div>
             <div>
               <h2 className="text-sm font-semibold font-mono text-text-primary uppercase tracking-wider">
-                Event Provenance & Normalization Split Stream
+                Normalized Security Events
               </h2>
               <p className="text-xs font-mono text-text-secondary mt-0.5">
-                Raw input side-by-side with parsed and standardized schema linked by trace ID
+                Processed events mapped to the Universal Event Schema with traceable raw payloads
               </p>
             </div>
           </div>
@@ -311,8 +289,7 @@ export function Logs() {
               className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-xs font-mono text-text-primary focus:border-accent focus:outline-none"
             >
               <option value="all">All Statuses</option>
-              <option value="Normalized">Normalized</option>
-              <option value="Processing">Processing</option>
+              <option value="Valid">Valid</option>
               <option value="Validation Failed">Validation Failed</option>
             </select>
           </div>
