@@ -19,29 +19,30 @@ export function EventActivityChart({ data }: EventActivityChartProps) {
             <stop offset="100%" stopColor="#06B6D4" />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="#1F2937" strokeDasharray="3 5" vertical={false} />
+        <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 5" vertical={false} />
         <XAxis
           dataKey="time"
-          tick={{ fill: "#8B93A7", fontSize: 11, fontFamily: "JetBrains Mono" }}
-          axisLine={{ stroke: "#1F2937" }}
+          tick={{ fill: "var(--color-text-secondary)", fontSize: 11, fontFamily: "JetBrains Mono" }}
+          axisLine={{ stroke: "var(--color-border)" }}
           tickLine={false}
         />
         <YAxis
-          tick={{ fill: "#8B93A7", fontSize: 11, fontFamily: "JetBrains Mono" }}
+          tick={{ fill: "var(--color-text-secondary)", fontSize: 11, fontFamily: "JetBrains Mono" }}
           axisLine={false}
           tickLine={false}
           width={48}
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#111827",
+            backgroundColor: "var(--color-surface)",
             border: "1px solid rgba(6,182,212,0.3)",
             borderRadius: 8,
-            color: "#E6EDF3",
+            color: "var(--color-text-primary)",
             fontSize: 12,
             fontFamily: "JetBrains Mono",
           }}
-          labelStyle={{ color: "#8B93A7", fontSize: 11 }}
+          labelStyle={{ color: "var(--color-text-secondary)", fontSize: 11 }}
+          itemStyle={{ color: "var(--color-text-primary)" }}
           formatter={(value: number) => [value.toLocaleString(), "Events"]}
         />
         <Area
@@ -51,7 +52,7 @@ export function EventActivityChart({ data }: EventActivityChartProps) {
           strokeWidth={2}
           fill="url(#eventActivityFillChetas)"
           dot={false}
-          activeDot={{ r: 4, fill: "#06B6D4", stroke: "#111827", strokeWidth: 2 }}
+          activeDot={{ r: 4, fill: "#06B6D4", stroke: "var(--color-surface)", strokeWidth: 2 }}
         />
       </AreaChart>
     </ResponsiveContainer>
