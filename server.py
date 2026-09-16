@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from backend.ai.field_inference import infer_field_mapping
 from fastapi.middleware.cors import CORSMiddleware
 from backend.processing.pipeline import process_event
@@ -460,6 +460,152 @@ def review_source_profile(profile_id: int, decision: str):
         "source_profile_id": result[0],
         "status_value": result[1]
     }
+
+
+@app.post("/api/v1/source-profiles/validate")
+def validate_source_profile(payload: dict):
+
+    profile_name = payload.get("profile_name")
+    source_type = payload.get("source_type")
+    vendor = payload.get("vendor")
+    log_format = payload.get("format")
+    field_mapping = payload.get("field_mapping")
+    decision = payload.get("decision")
+
+    # ---------------------------------------------------------------
+    # 1. Validate required fields
+    # ---------------------------------------------------------------
+
+    if not profile_name:
+        raise HTTPException(
+            status_code=400,
+            detail="profile_name is required."
+        )
+
+    if not source_type:
+        raise HTTPException(
+            status_code=400,
+            detail="source_type is required."
+        )
+
+    if not log_format:
+        raise HTTPException(
+            status_code=400,
+            detail="format is required."
+        )
+
+    if not isinstance(field_mapping, list):
+        raise HTTPException(
+            status_code=400,
+            detail="field_mapping must be a list."
+        )
+
+    if decision not in ["Approved", "Rejected"]:
+        raise HTTPException(
+            status_code=400,
+            detail="decision must be Approved or Rejected."
+        )
+
+    # ---------------------------------------------------------------
+    # 2. Validate each mapping
+    # ---------------------------------------------------------------
+
+    for mapping in field_mapping:
+
+        if not isinstance(mapping, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Each mapping must be an object."
+            )
+
+        if not mapping.get("source_field"):
+            raise HTTPException(
+                status_code=400,
+                detail="Each mapping requires source_field."
+            )
+
+        if not mapping.get("target_field"):
+            raise HTTPException(
+                status_code=400,
+                detail="Each mapping requires target_field."
+            )
+
+    # ---------------------------------------------------------------
+    # 3. Save human-validated mapping
+    # ---------------------------------------------------------------
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            INSERT INTO source_profiles
+            (
+                profile_name,
+                source_type,
+                vendor,
+                format,
+                field_mapping,
+                parser_config,
+                status,
+                created_at,
+                approved_at
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                CASE
+                    WHEN %s = 'Approved' THEN NOW()
+                    ELSE NULL
+                END
+            )
+            RETURNING source_profile_id
+            """,
+            (
+                profile_name,
+                source_type,
+                vendor,
+                log_format,
+                Json(field_mapping),
+                Json({}),
+                decision,
+                decision
+            )
+        )
+
+        profile_id = cursor.fetchone()[0]
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "source_profile_id": profile_id,
+            "decision": decision,
+            "field_mapping": field_mapping
+        }
+
+    except Exception as e:
+
+        conn.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save source profile: {str(e)}"
+        )
+
+    finally:
+
+        cursor.close()
+        conn.close()
 
 
 @app.get("/api/v1/audit-logs")
