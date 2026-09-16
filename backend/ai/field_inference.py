@@ -55,25 +55,77 @@ def infer_field_mapping(log_sample: str) -> dict:
     prompt = f"""
 You are a log normalization assistant for LogNexus.
 
-Analyze the following unknown log sample.
+Analyze the following unknown log sample and infer the STRUCTURE
+of the log.
 
 UNKNOWN LOG:
 {log_sample}
 
-Map fields from the unknown log to the most appropriate
+Map each field/position in the unknown log to the most appropriate
 LogNexus normalized event field.
 
 AVAILABLE LOGNEXUS FIELDS:
 {json.dumps(target_schema, indent=2)}
 
-Rules:
-1. Infer meaning from field names and values.
-2. Do not invent fields that are not present.
-3. Do not guess sensitive values.
-4. Use confidence between 0 and 1.
-5. Only suggest mappings that are reasonably supported by the sample.
-6. Preserve source-specific information through extra_data when appropriate.
-7. Return only the structured mapping.
+IMPORTANT:
+
+1. Identify the meaning of each field, not merely its example value.
+
+2. DO NOT use actual sample values as source_field names.
+
+3. For logs with explicit field names, use the actual field name.
+   Example:
+   src_ip -> source_ip
+   dst_ip -> destination_ip
+   username -> user_name
+
+4. For positional/unlabelled logs, identify fields by their position.
+   Use names such as:
+   field_1
+   field_2
+   field_3
+   etc.
+
+5. Example:
+   If the log is:
+   timestamp firewall01 ALLOW 10.0.0.1 10.0.0.2 TCP
+
+   return mappings conceptually like:
+   field_1 -> timestamp
+   field_2 -> device
+   field_3 -> action
+   field_4 -> source_ip
+   field_5 -> destination_ip
+   field_6 -> extra_data
+
+6. Do not invent fields that are not present.
+
+7. Do not guess sensitive values.
+
+8. Use confidence between 0 and 1.
+
+9. Only suggest mappings reasonably supported by the sample.
+
+10. Preserve source-specific fields through extra_data when
+    there is no suitable normalized field.
+
+11. Return ONLY the structured mapping.
+
+12. The destination field key MUST be named "target_field".
+    NEVER use "normalized_field".
+
+13. Return the mapping using exactly this JSON structure:
+13. Return the mapping using exactly this JSON structure:
+{{
+  "mappings": [
+    {{
+      "source_field": "field_1",
+      "target_field": "timestamp",
+      "confidence": 1.0,
+      "reason": "The first field represents the event timestamp."
+    }}
+  ]
+}}
 """
 
     response = client.models.generate_content(
