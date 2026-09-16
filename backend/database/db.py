@@ -4,7 +4,7 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "lognexus",
     "user": "postgres",
-    "password": "11@Mandar",
+    "password": "@Sid786Fir",
     "port": 5432
 }
 
