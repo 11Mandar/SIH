@@ -24,8 +24,44 @@ app.add_middleware(
 init_db()
 
 
+def get_source_id_for_event(event: dict):
+    computer_name = event.get("computer")
+
+    if not computer_name:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT source_id
+            FROM sources
+            WHERE hostname = %s
+              AND source_type = 'Windows'
+              AND status = 'active'
+            LIMIT 1
+            """,
+            (computer_name,)
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            return row[0]
+
+        return None
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.post("/api/v1/events")
 def receive_event(event: dict):
+
+    # Identify the source from the Agent's computer name
+    source_id = get_source_id_for_event(event)
 
     # ---------------------------------------------------------------
     # 1. Process event through the common pipeline
@@ -42,7 +78,7 @@ def receive_event(event: dict):
         persistence_result = persist_processing_error(
             event=event,
             processing_result=result,
-            source_id=1,
+            source_id=source_id,
         )
 
         return {
@@ -62,7 +98,7 @@ def receive_event(event: dict):
     persistence_result = persist_processed_event(
         event=event,
         processing_result=result,
-        source_id=1,
+        source_id=source_id,
     )
 
     # ---------------------------------------------------------------
@@ -76,7 +112,6 @@ def receive_event(event: dict):
         "detected_format": result.detected_format,
         "normalized_event": result.validated_event.model_dump(),
     }
-
 
 @app.get("/api/v1/normalized-events")
 def get_normalized_events():
