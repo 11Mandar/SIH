@@ -6,7 +6,10 @@ import requests
 import win32evtlog
 
 
-SERVER_URL = "http://127.0.0.1:8000/api/v1/events"
+SERVER_URL = os.getenv(
+    "LOGNEXUS_SERVER_URL",
+    "http://127.0.0.1:8000/api/v1/events"
+)
 
 SERVER = "localhost"
 LOG_TYPE = "Security"
