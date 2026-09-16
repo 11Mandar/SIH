@@ -207,14 +207,20 @@ def classify_syslog_event(message):
         )
 
     # Firewall/network actions
-    if re.search(r"\bdeny\b|\bdenied\b|\bblocked\b|\bdropped\b", text):
+    if re.search(
+        r"\bdeny\b|\bdenied\b|\bblocked\b|\bdropped\b",
+        text,
+    ):
         return (
             "Network Connection",
             "Connection Blocked",
             "Failure",
         )
 
-    if re.search(r"\ballow\b|\ballowed\b|\baccepted\b", text):
+    if re.search(
+        r"\ballow\b|\ballowed\b|\baccepted\b",
+        text,
+    ):
         return (
             "Network Connection",
             "Connection Allowed",
@@ -386,12 +392,119 @@ def normalize_syslog_event(event):
 
 
 # ---------------------------------------------------------------------------
-# Local test
+# Profile-Based Normalization
+# ---------------------------------------------------------------------------
+
+def normalize_profile_event(parsed_fields, field_mapping):
+    """
+    Normalize an event using a human-approved Source Profile mapping.
+    """
+
+    normalized = {
+        "event_id": None,
+        "timestamp": None,
+        "source": "Custom",
+        "device": None,
+        "event_type": "Custom Event",
+        "severity": None,
+        "source_ip": None,
+        "source_port": None,
+        "destination_ip": None,
+        "destination_port": None,
+        "user_id": None,
+        "user_name": None,
+        "action": None,
+        "outcome": None,
+        "message": [],
+        "extra_data": {},
+    }
+
+    for mapping in field_mapping:
+        source_field = mapping.get("source_field")
+        target_field = mapping.get("target_field")
+
+        if not source_field or not target_field:
+            continue
+
+        value = parsed_fields.get(source_field)
+
+        if value is None or value == "":
+            continue
+
+        # Message must always remain a list
+        if target_field == "message":
+            normalized["message"].append({
+                "name": source_field,
+                "value": value,
+            })
+
+        # Extra data must always remain a dictionary
+        elif target_field == "extra_data":
+            normalized["extra_data"][source_field] = value
+
+        # Normal schema fields
+        elif target_field in normalized:
+            normalized[target_field] = value
+
+        # Unknown target fields → extra_data
+        else:
+            normalized["extra_data"][target_field] = value
+
+    # Safety guarantees for Pydantic validation
+    if not normalized.get("event_type"):
+        normalized["event_type"] = "Custom Event"
+
+    if not isinstance(normalized.get("message"), list):
+        normalized["message"] = []
+
+    if not isinstance(normalized.get("extra_data"), dict):
+        normalized["extra_data"] = {}
+
+    return normalized
+
+
+# ---------------------------------------------------------------------------
+# Local Tests
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
-    test_event = {
+    # ---------------------------------------------------------------
+    # Test 1: Windows Event
+    # ---------------------------------------------------------------
+
+    windows_event = {
+        "event_id": 4624,
+        "timestamp": "2026-09-12T12:00:00+05:30",
+        "source": "Microsoft-Windows-Security-Auditing",
+        "computer": "TEST-PC",
+        "message_data": [
+            {
+                "name": "TargetUserName",
+                "value": "admin",
+            }
+        ],
+        "source_ip": "192.168.1.20",
+        "source_port": "51520",
+        "destination_ip": None,
+        "destination_port": None,
+    }
+
+    print("=" * 70)
+    print("WINDOWS EVENT TEST")
+    print("=" * 70)
+
+    normalized_windows = normalize_windows_event(
+        windows_event
+    )
+
+    print(normalized_windows)
+
+    # ---------------------------------------------------------------
+    # Test 2: Syslog
+    # ---------------------------------------------------------------
+
+    syslog_event = {
         "protocol": "Syslog",
         "version": 1,
         "pri": 165,
@@ -416,12 +529,131 @@ if __name__ == "__main__":
         "raw_message": (
             "<165>1 2026-09-12T12:00:00Z "
             "firewall01 firewall 1234 FW001 "
-            "[exampleSDID@32473 eventID=\"1011\"] "
+            '[exampleSDID@32473 eventID="1011"] '
             "Connection blocked src=10.0.0.5 dst=10.0.0.10"
         ),
     }
 
-    normalized = normalize_syslog_event(test_event)
+    print()
+    print("=" * 70)
+    print("SYSLOG EVENT TEST")
+    print("=" * 70)
 
-    print("Normalized Syslog Event:")
-    print(normalized)
+    normalized_syslog = normalize_syslog_event(
+        syslog_event
+    )
+
+    print(normalized_syslog)
+
+    # ---------------------------------------------------------------
+    # Test 3: Source Profile
+    # ---------------------------------------------------------------
+
+    profile_fields = {
+        "field_1": "2026-09-16T14:30:00Z",
+        "field_2": "firewall01",
+        "field_3": "DENY",
+        "field_4": "10.0.0.5",
+        "field_5": "10.0.0.10",
+        "field_6": "TCP",
+        "field_7": "51520",
+        "field_8": "443",
+    }
+
+    profile_mapping = [
+        {
+            "source_field": "field_1",
+            "target_field": "timestamp",
+        },
+        {
+            "source_field": "field_2",
+            "target_field": "device",
+        },
+        {
+            "source_field": "field_3",
+            "target_field": "action",
+        },
+        {
+            "source_field": "field_4",
+            "target_field": "source_ip",
+        },
+        {
+            "source_field": "field_5",
+            "target_field": "destination_ip",
+        },
+        {
+            "source_field": "field_6",
+            "target_field": "extra_data",
+        },
+        {
+            "source_field": "field_7",
+            "target_field": "source_port",
+        },
+        {
+            "source_field": "field_8",
+            "target_field": "destination_port",
+        },
+    ]
+
+    print()
+    print("=" * 70)
+    print("SOURCE PROFILE TEST")
+    print("=" * 70)
+
+    def normalize_profile_event(parsed_fields, field_mapping):
+        normalized = {
+            "event_id": None,
+            "timestamp": None,
+            "source": "Custom",
+            "device": None,
+            "event_type": "Custom Event",
+            "severity": None,
+            "source_ip": None,
+            "source_port": None,
+            "destination_ip": None,
+            "destination_port": None,
+            "user_id": None,
+            "user_name": None,
+            "action": None,
+            "outcome": None,
+            "message": [],
+            "extra_data": {},
+        }
+
+        if not isinstance(parsed_fields, dict):
+            raise TypeError(
+                "parsed_fields must be a dictionary."
+            )
+
+        if not isinstance(field_mapping, list):
+            raise TypeError(
+                "field_mapping must be a list."
+            )
+
+        for mapping in field_mapping:
+            if not isinstance(mapping, dict):
+                continue
+
+            source_field = mapping.get("source_field")
+            target_field = mapping.get("target_field")
+
+            if not source_field or not target_field:
+                continue
+
+            if source_field not in parsed_fields:
+                continue
+
+            value = parsed_fields[source_field]
+
+            if target_field == "extra_data":
+                normalized["extra_data"][source_field] = value
+
+            elif target_field in normalized:
+                normalized[target_field] = value
+
+            else:
+                normalized["extra_data"][target_field] = value
+
+        return normalized
+
+        print(normalized_profile)
