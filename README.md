@@ -1,80 +1,62 @@
-\# LogNexus
+# LogNexus
 
-\## Universal Log Pre-processing Framework
+### Universal Log Pre-Processing Framework
 
+> **SIH Problem Statement:** SIH26156  
+> **Domain:** CyberSecurity / Software  
+> **Project:** LogNexus  
+> **Purpose:** Universal preprocessing, normalization and onboarding of heterogeneous security logs.
 
+---
 
-\*\*SIH Problem Statement:\*\* SIH26156  
+## 📌 Overview
 
-\*\*Team:\*\* Origin
+Modern IT environments generate logs from many different sources such as:
 
+- Windows systems
+- Linux systems
+- Firewalls
+- Routers
+- Switches
+- Security tools
+- Applications
+- Cloud platforms
+- IoT devices
 
+Each source can produce logs in a different format, structure and terminology.
 
-LogNexus is a centralized log pre-processing framework designed to process heterogeneous logs from different sources and formats.
+This creates a major challenge for security monitoring systems because downstream analytics and SIEM platforms need structured and consistent event data.
 
+**LogNexus** is a centralized log preprocessing framework designed to convert heterogeneous log sources into a **common Universal Event Schema**.
 
-
-\### Key Features
-
-
-
-\- Log ingestion from configured sources
-
-\- Automatic log format detection
-
-\- Source-specific parsing
-
-\- Common field normalization
-
-\- Event validation
-
-\- Raw log preservation
-
-\- Raw-to-normalized traceability using trace IDs
-
-\- PostgreSQL-based storage
-
-\- Web-based monitoring dashboard
-
-\- Source profile management
-
-\- AI-assisted field mapping concept for unknown sources
-
-
-
-\### Architecture
-
-
+The framework follows a configurable processing pipeline:
 
 ```text
-
-Log Sources
-
-&#x20;    ↓
-
-Ingestion
-
-&#x20;    ↓
-
-Format Detection
-
-&#x20;    ↓
-
-Parsing
-
-&#x20;    ↓
-
-Normalization
-
-&#x20;    ↓
-
-Validation
-
-&#x20;    ↓
-
-Raw + Normalized Storage
-
-&#x20;    ↓
-
-Dashboard / SIEM / Analytics
-
+Heterogeneous Log Sources
+          │
+          ▼
+     Ingestion Layer
+          │
+          ▼
+    Format Detection
+          │
+          ▼
+        Parsing
+          │
+          ▼
+   Field Mapping / Normalization
+          │
+          ▼
+       Validation
+          │
+          ├───────────────┐
+          ▼               ▼
+      Raw Event      Normalized Event
+          │               │
+          └───────┬───────┘
+                  ▼
+             PostgreSQL
+                  │
+                  ▼
+       Dashboard / SIEM /
+       Data Lake / Analytics
