@@ -60,6 +60,7 @@ Heterogeneous Log Sources
                   ▼
        Dashboard / SIEM /
        Data Lake / Analytics
+```
 
 
 <img width="1919" height="873" alt="image" src="https://github.com/user-attachments/assets/7e01140e-c650-4789-8f18-ac6694a3b0a4" />
